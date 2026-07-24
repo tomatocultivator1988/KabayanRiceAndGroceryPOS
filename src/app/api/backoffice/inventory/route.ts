@@ -57,7 +57,10 @@ export async function POST(request: NextRequest) {
       .update({ stock_qty: newQty })
       .eq("id", itemId).eq("store_id", storeId)
 
-    if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
+    if (updateErr) {
+      console.error("inventory update error:", updateErr)
+      return NextResponse.json({ error: "items update: " + updateErr.message }, { status: 500 })
+    }
 
     const { error: logErr } = await db.from("inventory_log").insert({
       store_id: storeId,
@@ -70,11 +73,15 @@ export async function POST(request: NextRequest) {
       employee_id: session.employeeId,
     })
 
-    if (logErr) return NextResponse.json({ error: logErr.message }, { status: 500 })
+    if (logErr) {
+      console.error("inventory_log insert error:", logErr)
+      return NextResponse.json({ error: "log insert: " + logErr.message }, { status: 500 })
+    }
 
     return NextResponse.json({ success: true, newQty })
   } catch (error: any) {
     if (error.message === "Unauthorized") return unauth()
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    console.error("inventory POST unhandled:", error)
+    return NextResponse.json({ error: error?.message || "Internal server error" }, { status: 500 })
   }
 }
