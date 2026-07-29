@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Loader2Icon, HandshakeIcon, ArrowDownToLineIcon, CheckCircle2Icon, HistoryIcon } from "lucide-react"
+import { Loader2Icon, HandshakeIcon, ArrowDownToLineIcon, CheckCircle2Icon, HistoryIcon, Undo2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -44,6 +44,10 @@ export default function ConsignmentsPage() {
   const [receiveItem, setReceiveItem] = useState<ConsignmentItem | null>(null)
   const [receiveQty, setReceiveQty] = useState("")
   const [receiving, setReceiving] = useState(false)
+  const [pullOutItem, setPullOutItem] = useState<ConsignmentItem | null>(null)
+  const [pullOutQty, setPullOutQty] = useState("")
+  const [pullOutReason, setPullOutReason] = useState("")
+  const [pullingOut, setPullingOut] = useState(false)
 
   useEffect(() => { loadItems() }, [])
 
@@ -104,6 +108,29 @@ export default function ConsignmentsPage() {
     setReceiving(false)
   }
 
+  async function handlePullOut() {
+    if (!pullOutItem || !pullOutQty || Number(pullOutQty) <= 0) return
+    const qty = Number(pullOutQty)
+    if (qty > pullOutItem.stockQty) { toast.error(`Only ${Number(pullOutItem.stockQty).toFixed(0)} units available to pull out`); return }
+    setPullingOut(true)
+    try {
+      const res = await fetch("/api/backoffice/inventory", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemId: pullOutItem.id,
+          adjustmentType: "return_to_supplier",
+          quantity: -qty,
+          reason: pullOutReason || "Consignment pull out",
+        }),
+      })
+      const d = await res.json()
+      if (!res.ok) { toast.error(d.error || "Failed to pull out stock"); setPullingOut(false); return }
+      toast.success(`Pulled out ${qty.toFixed(0)} units of ${pullOutItem.name}`)
+      setPullOutItem(null); setPullOutQty(""); setPullOutReason(""); await loadItems()
+    } catch { toast.error("Failed") }
+    setPullingOut(false)
+  }
+
   function fmoney(v: number | string | null | undefined) { return `₱${Number(v ?? 0).toFixed(2)}` }
 
   if (loading) return <div className="flex justify-center py-16"><Loader2Icon className="h-8 w-8 animate-spin text-amber-600" /></div>
@@ -147,6 +174,7 @@ export default function ConsignmentsPage() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <Button variant="outline" size="sm" onClick={() => { setReceiveItem(item); setReceiveQty("") }}><ArrowDownToLineIcon className="h-3.5 w-3.5 mr-1" /> Receive</Button>
+                    <Button variant="outline" size="sm" onClick={() => { setPullOutItem(item); setPullOutQty(""); setPullOutReason("") }} disabled={item.stockQty <= 0}><Undo2Icon className="h-3.5 w-3.5 mr-1" /> Pull Out</Button>
                     <Button variant="outline" size="sm" onClick={() => openHistory(item)}><HistoryIcon className="h-3.5 w-3.5 mr-1" /> History</Button>
                     <Button size="sm" disabled={item.soldThisPeriod <= 0} onClick={() => { setSettleItem(item); setSettleNote("") }} className="bg-green-700 hover:bg-green-800 text-white"><CheckCircle2Icon className="h-3.5 w-3.5 mr-1" /> Settle</Button>
                   </div>
@@ -230,6 +258,33 @@ export default function ConsignmentsPage() {
               Add {receiveQty || 0} Units to Stock
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Pull Out Dialog */}
+      <Dialog open={!!pullOutItem} onOpenChange={() => { setPullOutItem(null); setPullOutQty(""); setPullOutReason("") }}>
+        <DialogContent className="bg-gold-100 border-amber-300/60 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-stone-800">Pull Out Consignment Stock</DialogTitle>
+            <DialogDescription className="text-stone-600">{pullOutItem?.name} — return unsold stock to {pullOutItem?.supplierName || "supplier"}</DialogDescription>
+          </DialogHeader>
+          {pullOutItem && (
+            <div className="space-y-3">
+              <p className="text-xs text-stone-500">Current on hand: <strong>{Number(pullOutItem.stockQty).toFixed(0)}</strong></p>
+              <div className="space-y-1">
+                <Label className="text-xs text-stone-500">Quantity to Pull Out</Label>
+                <Input type="number" min="1" max={pullOutItem.stockQty} value={pullOutQty} onChange={e => setPullOutQty(e.target.value)} placeholder="e.g., 10" className="bg-gold-200 border-amber-300/60 text-stone-800" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-stone-500">Reason (optional)</Label>
+                <Input value={pullOutReason} onChange={e => setPullOutReason(e.target.value)} placeholder="e.g., Expired, slow-moving" className="bg-gold-200 border-amber-300/60 text-stone-800" />
+              </div>
+              <Button onClick={handlePullOut} disabled={pullingOut || !pullOutQty || Number(pullOutQty) <= 0} className="w-full bg-stone-700 hover:bg-stone-800 text-white">
+                {pullingOut ? <Loader2Icon className="h-4 w-4 animate-spin mr-2" /> : <Undo2Icon className="h-4 w-4 mr-2" />}
+                Pull Out {pullOutQty || 0} Units
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

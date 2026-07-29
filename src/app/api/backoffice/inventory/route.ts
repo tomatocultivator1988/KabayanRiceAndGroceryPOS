@@ -50,7 +50,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Adjustment would make stock negative (current: ${oldQty})` }, { status: 400 })
     }
 
-    const adjReason: string = adjustmentType === "stock-in" ? "delivery" : "adjustment"
+    const adjReason: string = adjustmentType === "stock-in" ? "delivery"
+      : adjustmentType === "return_to_supplier" ? "return_to_supplier"
+      : "adjustment"
     const adjNote: string = reason || adjustmentType || "adjustment"
 
     const { error: updateErr } = await db.from("items")
