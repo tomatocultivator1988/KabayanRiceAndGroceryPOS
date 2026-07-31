@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { LogOutIcon, LayoutDashboardIcon, Search, ShoppingCart, X, Plus, Minus, User, CreditCard, Loader2Icon, BanknoteIcon, DoorOpenIcon, DoorClosedIcon } from "lucide-react"
+import { LogOutIcon, LayoutDashboardIcon, Search, ShoppingCart, X, Plus, Minus, User, CreditCard, Loader2Icon, BanknoteIcon, DoorOpenIcon, DoorClosedIcon, WifiOffIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -10,12 +10,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useCart, type CartItem } from "@/hooks/use-cart"
 import { toast } from "sonner"
+import { v4 as uuid } from "uuid"
 import { DenominationCounter, type DenomState } from "@/components/denomination-counter"
+import { offlineStore } from "@/lib/offline/store"
+import { syncNow, hasPending, pendingCount } from "@/lib/offline/sync"
+import { allocateGcashFirst } from "@/lib/offline/alloc"
 
 interface CatalogItem {
   id: string; name: string; category_id: string | null; sell_by: "weight" | "unit";
   stock_qty: number; min_stock: number; tax_rate_id: string | null;
   tax_rate: number; discount_eligible: boolean; stock_status: string;
+  barcode: string | null;
   units: { id: string; name: string; base_qty: number; price: number; min_qty: number; is_default: boolean }[];
   default_price: number;
 }
@@ -69,6 +74,8 @@ export default function PosPage() {
   const [shiftCloseGcash, setShiftCloseGcash] = useState("0")
   const [shiftCloseNote, setShiftCloseNote] = useState("")
   const [shiftSaving, setShiftSaving] = useState(false)
+  const [syncIssues, setSyncIssues] = useState(0)
+  const [syncModal, setSyncModal] = useState(false)
 
   const [collModal, setCollModal] = useState(false)
   const [collSearch, setCollSearch] = useState("")
@@ -78,47 +85,140 @@ export default function PosPage() {
   const [collMethod, setCollMethod] = useState("cash")
   const [collSaving, setCollSaving] = useState(false)
 
-  // Auth
-  useEffect(() => { fetch("/api/pos/me").then(r => r.json()).then(d => {
-    if (d.employee) setData(prev => ({ ...prev, user: d.employee }))
-    else { router.push("/auth/login") }
-  }).catch(() => { router.push("/auth/login") }) }, [router])
+  // Auth — cache the session when online so offline boot can still identify the cashier
+  useEffect(() => {
+    fetch("/api/pos/me").then(r => r.json()).then(d => {
+      if (d.employee) {
+        setData(prev => ({ ...prev, user: d.employee }))
+        offlineStore.setSession({ employee: d.employee, storeId: d.storeId })
+      } else {
+        router.push("/auth/login")
+      }
+    }).catch(() => {
+      const cached = offlineStore.getSession()
+      if (cached?.employee) setData(prev => ({ ...prev, user: cached.employee }))
+      else router.push("/auth/login")
+    })
+  }, [router])
 
-  // Catalog
+  // Catalog — fall back to the cached snapshot when offline
   useEffect(() => {
     Promise.all([
       fetch("/api/catalog").then(r => r.json()),
       fetch("/api/backoffice/categories").then(r => r.json()),
     ]).then(([catJson, catCatJson]) => {
-      setData(prev => ({ ...prev, catalog: catJson.items ?? [], categories: catCatJson.categories ?? [] }))
+      const items = catJson.items ?? []
+      const cats = catCatJson.categories ?? []
+      setData(prev => ({ ...prev, catalog: items, categories: cats }))
+      offlineStore.setCatalog(items)
+      offlineStore.setCategories(cats)
+      setLoading(false)
+    }).catch(() => {
+      setData(prev => ({ ...prev, catalog: offlineStore.getCatalog() as CatalogItem[], categories: offlineStore.getCategories() as Category[] }))
       setLoading(false)
     })
   }, [])
 
-  // Load current shift
-  function loadShift() {
+  // Load current shift — server is authoritative only when nothing is pending
+  // locally; overwriting the clientShift ledger mid-sync would erase unsynced
+  // offline sales from the close variance.
+  const loadShift = useCallback(() => {
     return fetch("/api/shifts").then(r => r.json()).then(d => {
-      setShift(d.shift ?? null)
+      const s = d.shift ?? null
+      setShift(s)
+      if (offlineStore.getQueue().length === 0) {
+        if (s) {
+          offlineStore.setClientShift({
+            openedAt: s.opened_at,
+            openingCash: Number(s.opening_cash),
+            openingGcash: Number(s.opening_gcash || 0),
+            cashSales: Number(s.cash_sales || 0),
+            gcashSales: Number(s.gcash_sales || 0),
+            cashCollections: Number(s.cash_collections || 0),
+            gcashCollections: Number(s.gcash_collections || 0),
+            openSynced: true,
+          })
+        } else {
+          offlineStore.setClientShift(null)
+        }
+      }
       setShiftLoading(false)
-    }).catch(() => setShiftLoading(false))
-  }
-  useEffect(() => { loadShift() }, [])
+    }).catch(() => {
+      // Offline: reconstruct the shift view from the local ledger
+      const cs = offlineStore.getClientShift()
+      if (cs && cs.closingCash === undefined) {
+        setShift({
+          opened_at: cs.openedAt,
+          opening_cash: cs.openingCash,
+          opening_gcash: cs.openingGcash,
+          cash_sales: cs.cashSales,
+          gcash_sales: cs.gcashSales,
+          cash_collections: cs.cashCollections,
+          gcash_collections: cs.gcashCollections,
+          expected_cash: cs.openingCash + cs.cashSales + cs.cashCollections,
+          expected_gcash: cs.openingGcash + cs.gcashSales + cs.gcashCollections,
+        })
+      }
+      setShiftLoading(false)
+    })
+  }, [])
+  useEffect(() => { loadShift() }, [loadShift])
 
   async function openShift() {
     if (shiftOpenTotal < 0) { toast.error("Enter opening cash"); return }
+    // A previous offline close is still pending sync — never clobber it
+    if (offlineStore.getClientShift()?.closingCash !== undefined) {
+      const { synced } = await syncNow()
+      if (offlineStore.getClientShift()?.closingCash !== undefined) {
+        toast.error("Previous shift close still pending sync"); return
+      }
+      if (synced > 0) toast.success(`Synced ${synced} offline item(s)`)
+    }
     setShiftSaving(true)
-    const res = await fetch("/api/shifts", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ opening_cash: shiftOpenTotal, opening_denoms: shiftOpenDenoms, opening_gcash: Number(shiftOpenGcash) || 0 }),
-    })
-    const json = await res.json()
-    if (!res.ok) { toast.error(json.error || "Failed to open shift"); setShiftSaving(false); return }
-    toast.success(`Shift opened — starting cash ₱${shiftOpenTotal.toFixed(2)}`)
-    setShiftSaving(false); setShiftOpenModal(false); setShiftOpenDenoms({}); setShiftOpenTotal(0); setShiftOpenGcash("0")
-    await loadShift()
+    try {
+      const res = await fetch("/api/shifts", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ opening_cash: shiftOpenTotal, opening_denoms: shiftOpenDenoms, opening_gcash: Number(shiftOpenGcash) || 0 }),
+      })
+      const json = await res.json()
+      if (!res.ok) { toast.error(json.error || "Failed to open shift"); setShiftSaving(false); return }
+      toast.success(`Shift opened — starting cash ₱${shiftOpenTotal.toFixed(2)}`)
+      setShiftSaving(false); setShiftOpenModal(false); setShiftOpenDenoms({}); setShiftOpenTotal(0); setShiftOpenGcash("0")
+      await loadShift()
+    } catch {
+      // Offline: record the opening locally; sync will POST it when back online
+      offlineStore.setClientShift({
+        openedAt: new Date().toISOString(),
+        openingCash: shiftOpenTotal,
+        openingGcash: Number(shiftOpenGcash) || 0,
+        cashSales: 0, gcashSales: 0, cashCollections: 0, gcashCollections: 0,
+        openSynced: false,
+      })
+      setShift({
+        opened_at: new Date().toISOString(),
+        opening_cash: shiftOpenTotal,
+        opening_gcash: Number(shiftOpenGcash) || 0,
+        cash_sales: 0, gcash_sales: 0, cash_collections: 0, gcash_collections: 0,
+        expected_cash: shiftOpenTotal,
+        expected_gcash: Number(shiftOpenGcash) || 0,
+      })
+      toast.success(`Shift opened offline — will sync when back online`)
+      setShiftSaving(false); setShiftOpenModal(false); setShiftOpenDenoms({}); setShiftOpenTotal(0); setShiftOpenGcash("0")
+    }
   }
 
   async function openCloseShiftModal() {
+    // Never let the cashier close while offline sales are still pending — the
+    // server computes expected cash from sales already in the DB, so closing
+    // early would lock unsynced sales out of the shift's figures forever.
+    if (offlineStore.getQueue().length > 0) {
+      const { synced } = await syncNow()
+      if (offlineStore.getQueue().length > 0) {
+        toast.error(`${offlineStore.getQueue().length} offline sale(s) still pending sync`)
+        return
+      }
+      if (synced > 0) toast.success(`Synced ${synced} offline sale(s)`)
+    }
     // Refresh shift to get latest expected cash
     await loadShift()
     setShiftCloseDenoms({}); setShiftCloseTotal(0); setShiftCloseNote(""); setShiftCloseGcash("0")
@@ -127,18 +227,53 @@ export default function PosPage() {
 
   async function closeShift() {
     setShiftSaving(true)
-    const res = await fetch("/api/shifts", {
-      method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ closing_cash: shiftCloseTotal, closing_denoms: shiftCloseDenoms, note: shiftCloseNote, closing_gcash: Number(shiftCloseGcash) || 0 }),
-    })
-    const json = await res.json()
-    if (!res.ok) { toast.error(json.error || "Failed to close shift"); setShiftSaving(false); return }
-    const s = json.shift
-    // Print close report
-    printShiftReport(s)
-    toast.success(`Shift closed. Variance: ${s.variance >= 0 ? "+" : ""}₱${Number(s.variance).toFixed(2)}`)
-    setShiftSaving(false); setShiftCloseModal(false)
-    await loadShift()
+    try {
+      const res = await fetch("/api/shifts", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ closing_cash: shiftCloseTotal, closing_denoms: shiftCloseDenoms, note: shiftCloseNote, closing_gcash: Number(shiftCloseGcash) || 0 }),
+      })
+      const json = await res.json()
+      if (!res.ok) { toast.error(json.error || "Failed to close shift"); setShiftSaving(false); return }
+      const s = json.shift
+      // Print close report
+      printShiftReport(s)
+      toast.success(`Shift closed. Variance: ${s.variance >= 0 ? "+" : ""}₱${Number(s.variance).toFixed(2)}`)
+      offlineStore.setClientShift(null)
+      setShiftSaving(false); setShiftCloseModal(false)
+      await loadShift()
+    } catch {
+      // Offline: record closing figures locally; sync will PUT close when back online
+      const cs = offlineStore.getClientShift()
+      if (!cs) { toast.error("No open shift to close"); setShiftSaving(false); return }
+      const expected = cs.openingCash + cs.cashSales + cs.cashCollections
+      const variance = Math.round((shiftCloseTotal - expected + 1e-12) * 100) / 100
+      offlineStore.setClientShift({
+        ...cs,
+        closingCash: shiftCloseTotal,
+        closingGcash: Number(shiftCloseGcash) || 0,
+        closingDenoms: shiftCloseDenoms,
+        note: shiftCloseNote,
+      })
+      // Print close report using local ledger figures
+      printShiftReport({
+        opened_at: cs.openedAt,
+        closed_at: new Date().toISOString(),
+        opening_cash: cs.openingCash,
+        cash_sales: cs.cashSales,
+        cash_collections: cs.cashCollections,
+        expected_cash: expected,
+        closing_cash: shiftCloseTotal,
+        variance,
+        opening_gcash: cs.openingGcash,
+        gcash_sales: cs.gcashSales,
+        closing_gcash: Number(shiftCloseGcash) || 0,
+        closing_denoms: shiftCloseDenoms,
+        note: shiftCloseNote,
+      })
+      toast.success(`Shift closed offline — will sync. Variance: ${variance >= 0 ? "+" : ""}₱${variance.toFixed(2)}`)
+      setShift(null)
+      setShiftSaving(false); setShiftCloseModal(false)
+    }
   }
 
   function printShiftReport(s: any) {
@@ -206,6 +341,31 @@ export default function PosPage() {
       setTimeout(() => scanRef.current?.focus(), 150)
   }, [payModal, upItem, custModal, collModal])
 
+  // Auto-sync: on mount and whenever connectivity returns
+  useEffect(() => {
+    const run = async () => {
+      if (!hasPending()) return
+      const { synced, failed } = await syncNow()
+      setSyncIssues(pendingCount())
+      if (synced > 0) loadShift()
+      if (failed > 0) {
+        const err = offlineStore.getLastError()
+        toast.error(err ? `Sync failed: ${err.message}` : "Some offline items couldn't sync yet")
+      }
+    }
+    run()
+    const onOnline = () => { run() }
+    const onOffline = () => {
+      if (hasPending()) setSyncIssues(pendingCount())
+    }
+    window.addEventListener("online", onOnline)
+    window.addEventListener("offline", onOffline)
+    return () => {
+      window.removeEventListener("online", onOnline)
+      window.removeEventListener("offline", onOffline)
+    }
+  }, [loadShift])
+
   function scanBarcode(code: string) {
     fetch(`/api/backoffice/items?q=${code}`).then(r => r.json()).then(d => {
       const match = (d.items ?? []).find((i: any) => i.barcode === code)
@@ -216,7 +376,12 @@ export default function PosPage() {
       } else {
         toast.error(`Barcode ${code} not found`)
       }
-    }).catch(() => toast.error("Barcode lookup failed"))
+    }).catch(() => {
+      // Offline — fall back to the cached catalog
+      const catItem = catalog.find(c => c.barcode === code)
+      if (catItem) openUnitPicker(catItem)
+      else toast.error(`Barcode ${code} not found (offline)`)
+    })
   }
 
   function openUnitPicker(item: CatalogItem) {
@@ -288,32 +453,63 @@ export default function PosPage() {
     const balance = isShort ? round2(total - paidTotal) : 0
     const change = paidTotal > total ? round2(paidTotal - total) : 0
     const totalPaid = cashPayment + gcashPayment
-    
+    // No utang/balance offline — can't verify customer balances without a network
+    if (!navigator.onLine && isShort) {
+      toast.error("Pay in full — utang is not available offline")
+      return
+    }
+
     setPaySaving(true)
+    const clientRef = uuid()
     const payments: { method: string; amount: number }[] = []
     if (cash > 0) payments.push({ method: "cash", amount: cash })
     if (gcash > 0) payments.push({ method: "gcash", amount: gcash })
 
-    try {
-      const res = await fetch("/api/sales", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: cart.items.map(i => ({ itemId: i.itemId, itemName: i.itemName, unitId: i.unitId, unitName: i.unitName, baseQty: i.baseQty, qty: i.qty, unitPrice: i.unitPrice, discountEligible: i.discountEligible })),
-          payments,
-          customerId: cart.customerId,
-          discountType: cart.discount.type, discountValue: cart.discount.value,
-          discountAmount: cart.discountAmount, discountName: cart.discount.name,
-          subtotal: Math.round(cart.subtotal * 100) / 100,
-          taxTotal: Math.round(cart.taxTotal * 100) / 100,
-          deliveryFee: fee,
-          total,
-        }),
-      })
-      const json = await res.json()
-      if (!res.ok) { toast.error(json.error || "Sale failed"); setPaySaving(false); return }
+    const body = {
+      items: cart.items.map(i => ({ itemId: i.itemId, itemName: i.itemName, unitId: i.unitId, unitName: i.unitName, baseQty: i.baseQty, qty: i.qty, unitPrice: i.unitPrice, discountEligible: i.discountEligible })),
+      payments,
+      customerId: cart.customerId,
+      discountType: cart.discount.type, discountValue: cart.discount.value,
+      discountAmount: cart.discountAmount, discountName: cart.discount.name,
+      subtotal: Math.round(cart.subtotal * 100) / 100,
+      taxTotal: Math.round(cart.taxTotal * 100) / 100,
+      deliveryFee: fee,
+      total,
+      clientRef,
+    }
 
-      // Receipt — show preview modal first
-      const sn = String(json.sale.sale_number).padStart(6, "0")
+    // Server allocation is GCash-first, cash covers the remainder — mirror it so
+    // the clientShift ledger stays in lock-step with DB shift figures.
+    const { cashAlloc, gcashAlloc } = allocateGcashFirst(total, cash, gcash)
+
+    const nextOfflineNum = () => {
+      const n = offlineStore.getLastOfflineNum() + 1
+      offlineStore.setLastOfflineNum(n)
+      return `OF-${String(n).padStart(3, "0")}`
+    }
+
+    const queueOffline = (ref: string) => {
+      offlineStore.setQueue([...offlineStore.getQueue(), { clientRef, body, createdAt: new Date().toISOString(), ref }])
+    }
+
+    const bumpLedger = () => {
+      const cs = offlineStore.getClientShift()
+      if (!cs) return
+      const next = { ...cs, cashSales: round2(cs.cashSales + cashAlloc), gcashSales: round2(cs.gcashSales + gcashAlloc) }
+      offlineStore.setClientShift(next)
+      // Mirror into the on-screen shift chip while a local ledger is driving (offline)
+      if (offlineStore.getQueue().length > 0 && shift) {
+        setShift({
+          ...shift,
+          cash_sales: next.cashSales,
+          gcash_sales: next.gcashSales,
+          expected_cash: round2(next.openingCash + next.cashSales + next.cashCollections),
+          expected_gcash: round2(next.openingGcash + next.gcashSales + next.gcashCollections),
+        })
+      }
+    }
+
+    const showReceipt = async (sn: string) => {
       const receiptText = {
         header: "GroceryPOS",
         subtitle: `Receipt #${sn}`,
@@ -342,18 +538,77 @@ export default function PosPage() {
         } catch { /* drawer failed */ }
       }
 
-      toast.success(`Sale #${sn} — ₱${json.sale.total.toFixed(2)}`)
+      toast.success(`Sale #${sn} — ₱${total.toFixed(2)}`)
       cart.clearCart()
       cart.resumeMostRecentHeld()
       setPayModal(false)
       setPayCash(""); setPayGcash(""); setDeliveryFee("")
+    }
+
+    const finalizeOffline = () => {
+      const ref = nextOfflineNum()
+      queueOffline(ref)
+      bumpLedger()
+      setSyncIssues(prev => prev + 1)
+      void showReceipt(ref)
+    }
+
+    try {
+      const res = await fetch("/api/sales", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      // 4xx = server rejected (bad stock, validation) — show error, keep cart
+      if (res.status >= 400 && res.status < 500) {
+        const json = await res.json()
+        toast.error(json.error || "Sale failed"); setPaySaving(false); return
+      }
+      // Network failure or 5xx — the sale may or may not have committed server-side.
+      // Queue it with the same clientRef so a replay is idempotent (no double-sell).
+      if (!res.ok) {
+        finalizeOffline()
+        setPaySaving(false)
+        return
+      }
+      const json = await res.json()
+      if (!json.sale) { toast.error("Sale failed"); setPaySaving(false); return }
+
+      const sn = String(json.sale.sale_number).padStart(6, "0")
+      showReceipt(sn)
+      bumpLedger()
 
       // Refresh catalog to update stock
-      fetch("/api/catalog").then(r => r.json()).then(d =>
-        setData(prev => ({ ...prev, catalog: d.items ?? [] }))
-      )
-    } catch { toast.error("Sale failed") }
+      fetch("/api/catalog").then(r => r.json()).then(d => {
+        const items = d.items ?? []
+        setData(prev => ({ ...prev, catalog: items }))
+        offlineStore.setCatalog(items)
+      }).catch(() => {})
+    } catch {
+      // Fetch threw — offline or network dropped mid-flight. Queue idempotently.
+      finalizeOffline()
+    }
     setPaySaving(false)
+  }
+
+  async function retrySync() {
+    const { failed } = await syncNow()
+    setSyncIssues(pendingCount())
+    if (failed > 0) {
+      const err = offlineStore.getLastError()
+      toast.error(err ? `Sync failed: ${err.message}` : "Some offline items couldn't sync yet")
+    } else {
+      setSyncModal(false)
+      loadShift()
+      toast.success("All offline items synced")
+    }
+  }
+
+  function discardQueued(clientRef: string) {
+    const item = offlineStore.getQueue().find(q => q.clientRef === clientRef)
+    const label = item?.ref ? `receipt ${item.ref}` : `sale ${clientRef.slice(0, 8)}`
+    if (!window.confirm(`Discard ${label}? This sale will NOT be recorded in the system. Continue?`)) return
+    offlineStore.setQueue(offlineStore.getQueue().filter(q => q.clientRef !== clientRef))
+    setSyncIssues(pendingCount())
   }
 
   const discountOptions = [
@@ -433,6 +688,12 @@ export default function PosPage() {
             </div>
             <span className="hidden sm:inline text-xs sm:text-sm font-semibold text-amber-500 truncate max-w-[80px]">{user.name}</span>
           </div>
+          {syncIssues > 0 && (
+            <button onClick={() => setSyncModal(true)}
+              className="flex items-center gap-1.5 rounded-full border border-red-400/50 bg-red-500/15 px-3 py-1 text-xs font-medium text-red-400 hover:bg-red-500/30 transition-all" title="View pending offline sync">
+              <WifiOffIcon className="h-3.5 w-3.5" /> Pending Sync ({syncIssues})
+            </button>
+          )}
           {user.role === "admin" && (
             <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-primary hover:bg-primary/20 hover:text-primary" onClick={() => router.push("/dashboard")}>
               <LayoutDashboardIcon className="h-5 w-5" />
@@ -803,6 +1064,43 @@ export default function PosPage() {
               <Button className="flex-1 bg-primary hover:bg-amber-400" onClick={closeShift} disabled={shiftSaving}>
                 {shiftSaving ? <Loader2Icon className="h-4 w-4 animate-spin" /> : "Close Shift & Print"}
               </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══ PENDING SYNC MODAL ══ */}
+      <Dialog open={syncModal} onOpenChange={setSyncModal}>
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto bg-gold-200/90 border-amber-300/60 text-stone-800 p-5">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><WifiOffIcon className="h-5 w-5 text-amber-600" /> Pending Offline Items</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            {offlineStore.getQueue().length === 0 && offlineStore.getClientShift()?.closingCash === undefined && (
+              <p className="text-sm text-stone-500">Nothing pending — everything is synced.</p>
+            )}
+            {offlineStore.getClientShift()?.closingCash !== undefined && (
+              <div className="rounded-lg border border-amber-300/40 bg-gold-100/60 px-3 py-2 text-xs text-stone-600">
+                <strong>Shift close</strong> is waiting to sync (₱{Number(offlineStore.getClientShift()!.closingCash).toFixed(2)} counted).
+              </div>
+            )}
+            <div className="space-y-2 max-h-[40vh] overflow-y-auto">
+              {offlineStore.getQueue().map(item => (
+                <div key={item.clientRef} className="flex items-center justify-between rounded-lg border border-amber-300/40 bg-gold-100/60 px-3 py-2">
+                  <div>
+                    <div className="text-sm font-semibold">{item.ref ? `Receipt ${item.ref}` : `Sale ${item.clientRef.slice(0, 8)}`}</div>
+                    <div className="text-xs text-stone-500">₱{Number(item.body.total || 0).toFixed(2)} · {new Date(item.createdAt).toLocaleString("en-PH")}</div>
+                  </div>
+                  <button onClick={() => discardQueued(item.clientRef)} className="rounded-full border border-red-400/40 px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-500/20 transition-colors">Discard</button>
+                </div>
+              ))}
+            </div>
+            {offlineStore.getLastError() && (
+              <div className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-600">
+                <strong>Last error:</strong> {offlineStore.getLastError()!.message}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setSyncModal(false)}>Close</Button>
+              <Button className="flex-1 bg-primary hover:bg-amber-400" onClick={retrySync}>Retry Sync</Button>
             </div>
           </div>
         </DialogContent>

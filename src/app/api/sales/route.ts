@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
       taxTotal,        // number
       deliveryFee,     // number
       total,           // number
+      clientRef,       // string | null (offline idempotency)
     } = body
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -78,15 +79,42 @@ export async function POST(request: NextRequest) {
       p_balance: balance,
       p_change: change,
       p_sale_status: saleStatus,
+      p_client_ref: clientRef || null,
     })
 
     if (error) {
+      // Race fallback: a concurrent sync may have inserted the same client_ref,
+      // tripping the unique index. Return the existing sale instead of failing.
+      if (clientRef) {
+        const { data: existing } = await db.from("sales")
+          .select("id, sale_number, delivery_fee, total, amount_paid, balance, change, status")
+          .eq("store_id", storeId)
+          .eq("client_ref", clientRef)
+          .maybeSingle()
+        if (existing) {
+          return NextResponse.json({
+            sale: {
+              id: existing.id, sale_number: existing.sale_number,
+              deliveryFee: existing.delivery_fee || 0, total: existing.total,
+              amount_paid: existing.amount_paid, balance: existing.balance,
+              change: existing.change, status: existing.status,
+            },
+            duplicate: true,
+          }, { status: 200 })
+        }
+      }
       return NextResponse.json({ error: `Sale failed: ${error.message}` }, { status: 500 })
     }
 
     const result = data as any
     if (!result.success) {
       return NextResponse.json({ error: result.error || "Sale failed" }, { status: 400 })
+    }
+
+    // Idempotent replay of an already-processed offline sale — skip cart cleanup,
+    // which would wipe the cashier's current active cart.
+    if (result.duplicate) {
+      return NextResponse.json({ sale: result.sale, duplicate: true }, { status: 200 })
     }
 
     // Clear only the active cart (preserve held carts for other customers/cashiers)

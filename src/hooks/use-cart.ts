@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
+import { offlineStore } from "@/lib/offline/store"
 
 export interface CartItem {
   itemId: string
@@ -52,16 +53,49 @@ function nextCart(): StoredCart {
   return emptyCart(`c${Date.now()}_${cartSeq}`, `Customer #${cartSeq}`)
 }
 
+// Debounced write of carts to the server + localStorage mirror (offline survival).
+// Module-level like cartSeq: one useCart instance drives the POS page.
+let syncTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleCartSync(list: StoredCart[], actId: string | null) {
+  if (syncTimer) clearTimeout(syncTimer)
+  syncTimer = setTimeout(() => {
+    offlineStore.setCart({ carts: list, activeId: actId, savedAt: Date.now() })
+    fetch("/api/pos/cart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cart_data: { carts: list, activeId: actId } }),
+    }).catch(() => {})
+  }, 500)
+}
+
 export function useCart() {
   const initial = nextCart()
   const [carts, setCarts] = useState<StoredCart[]>([initial])
   const [activeId, setActiveId] = useState<string | null>(initial.id)
-  const syncRef = useRef<NodeJS.Timeout | null>(null)
   const loadedRef = useRef(false)
 
-  // Load carts from pos_carts on mount
+  // Load carts from pos_carts on mount (falls back to the localStorage mirror when offline)
   useEffect(() => {
+    const local = offlineStore.getCart()
+    const localCarts = (local?.carts ?? []) as StoredCart[]
+    const applyLocal = () => {
+      if (localCarts.length > 0) {
+        setCarts(localCarts)
+        setActiveId(local?.activeId ?? localCarts.find(c => c.active)?.id ?? localCarts[0].id)
+        cartSeq = localCarts.length
+      }
+    }
     fetch("/api/pos/cart").then(r => r.json()).then(d => {
+      // Recency guard: the mirror is newer than the server copy (offline session
+      // never got a successful POST) → restore it and push it back so the server
+      // catches up, instead of letting the stale server copy clobber held carts.
+      const serverUpdated = d.cart?.updated_at ? new Date(d.cart.updated_at).getTime() : 0
+      if (local && localCarts.length > 0 && local.savedAt > serverUpdated) {
+        applyLocal()
+        scheduleCartSync(localCarts, local.activeId)
+        loadedRef.current = true
+        return
+      }
       if (d.cart?.cart_data) {
         try {
           const raw = typeof d.cart.cart_data === "string" ? JSON.parse(d.cart.cart_data) : d.cart.cart_data
@@ -84,27 +118,18 @@ export function useCart() {
         } catch { /* ignore corrupt cart */ }
       }
       loadedRef.current = true
-    }).catch(() => { loadedRef.current = true })
-  }, [])
-
-  // Sync carts to DB every 500ms
-  const scheduleSync = useCallback((list: StoredCart[], actId: string | null) => {
-    if (syncRef.current) clearTimeout(syncRef.current)
-    syncRef.current = setTimeout(() => {
-      fetch("/api/pos/cart", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cart_data: { carts: list, activeId: actId } }),
-      }).catch(() => {})
-    }, 500)
+    }).catch(() => {
+      applyLocal()
+      loadedRef.current = true
+    })
   }, [])
 
   const active = carts.find(c => c.id === activeId) ?? null
 
   const sync = useCallback(() => {
     if (!loadedRef.current) return
-    scheduleSync(carts, activeId)
-  }, [carts, activeId, scheduleSync])
+    scheduleCartSync(carts, activeId)
+  }, [carts, activeId])
 
   useEffect(() => { sync() }, [sync])
 
