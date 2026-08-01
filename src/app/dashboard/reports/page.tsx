@@ -441,7 +441,7 @@ export default function ReportsPage() {
       { key: "qty", label: "Qty", format: "number" },
       { key: "unit", label: "Unit", format: "text" },
       { key: "unit_price", label: "Unit Price", format: "money" },
-      { key: "cost", label: "Cost", format: "money" },
+      { key: "total_cost", label: "Total Cost", format: "money" },
       { key: "profit", label: "Profit", format: "money" },
       { key: "discount_amount", label: "Discount", format: "money" },
       { key: "tax_amount", label: "Tax", format: "money" },

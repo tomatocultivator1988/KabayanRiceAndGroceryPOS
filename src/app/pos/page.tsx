@@ -84,6 +84,20 @@ export default function PosPage() {
   const [collAmount, setCollAmount] = useState("")
   const [collMethod, setCollMethod] = useState("cash")
   const [collSaving, setCollSaving] = useState(false)
+  const [storeName, setStoreName] = useState("")
+
+  // Store profile — used on receipt headers; cached so offline receipts still print the name
+  useEffect(() => {
+    fetch("/api/backoffice/store").then(r => r.json()).then(d => {
+      if (d.store?.name) {
+        setStoreName(d.store.name)
+        offlineStore.setStoreName(d.store.name)
+      }
+    }).catch(() => {
+      const cached = offlineStore.getStoreName()
+      if (cached) setStoreName(cached)
+    })
+  }, [])
 
   // Auth — cache the session when online so offline boot can still identify the cashier
   useEffect(() => {
@@ -139,7 +153,25 @@ export default function PosPage() {
             openSynced: true,
           })
         } else {
-          offlineStore.setClientShift(null)
+          // Server has no open shift. Keep a local shift that was opened offline
+          // and never synced (openSynced:false) — its open POST may still be
+          // pending; wiping it would silently erase the shift.
+          const cs = offlineStore.getClientShift()
+          if (cs && cs.openSynced === false && cs.closingCash === undefined) {
+            setShift({
+              opened_at: cs.openedAt,
+              opening_cash: cs.openingCash,
+              opening_gcash: cs.openingGcash,
+              cash_sales: cs.cashSales,
+              gcash_sales: cs.gcashSales,
+              cash_collections: cs.cashCollections,
+              gcash_collections: cs.gcashCollections,
+              expected_cash: cs.openingCash + cs.cashSales + cs.cashCollections,
+              expected_gcash: cs.openingGcash + cs.gcashSales + cs.gcashCollections,
+            })
+          } else {
+            offlineStore.setClientShift(null)
+          }
         }
       }
       setShiftLoading(false)
@@ -233,7 +265,16 @@ export default function PosPage() {
         body: JSON.stringify({ closing_cash: shiftCloseTotal, closing_denoms: shiftCloseDenoms, note: shiftCloseNote, closing_gcash: Number(shiftCloseGcash) || 0 }),
       })
       const json = await res.json()
-      if (!res.ok) { toast.error(json.error || "Failed to close shift"); setShiftSaving(false); return }
+      if (!res.ok) {
+        // The server never received this shift's open (it was opened offline and
+        // the open hasn't synced). Fall back to recording the close locally —
+        // the sync order (OPEN → SALES → CLOSE) will post both together.
+        if (res.status === 400 && /no open shift/i.test(json.error || "") && offlineStore.getClientShift()) {
+          finalizeOfflineClose()
+          return
+        }
+        toast.error(json.error || "Failed to close shift"); setShiftSaving(false); return
+      }
       const s = json.shift
       // Print close report
       printShiftReport(s)
@@ -243,37 +284,41 @@ export default function PosPage() {
       await loadShift()
     } catch {
       // Offline: record closing figures locally; sync will PUT close when back online
-      const cs = offlineStore.getClientShift()
-      if (!cs) { toast.error("No open shift to close"); setShiftSaving(false); return }
-      const expected = cs.openingCash + cs.cashSales + cs.cashCollections
-      const variance = Math.round((shiftCloseTotal - expected + 1e-12) * 100) / 100
-      offlineStore.setClientShift({
-        ...cs,
-        closingCash: shiftCloseTotal,
-        closingGcash: Number(shiftCloseGcash) || 0,
-        closingDenoms: shiftCloseDenoms,
-        note: shiftCloseNote,
-      })
-      // Print close report using local ledger figures
-      printShiftReport({
-        opened_at: cs.openedAt,
-        closed_at: new Date().toISOString(),
-        opening_cash: cs.openingCash,
-        cash_sales: cs.cashSales,
-        cash_collections: cs.cashCollections,
-        expected_cash: expected,
-        closing_cash: shiftCloseTotal,
-        variance,
-        opening_gcash: cs.openingGcash,
-        gcash_sales: cs.gcashSales,
-        closing_gcash: Number(shiftCloseGcash) || 0,
-        closing_denoms: shiftCloseDenoms,
-        note: shiftCloseNote,
-      })
-      toast.success(`Shift closed offline — will sync. Variance: ${variance >= 0 ? "+" : ""}₱${variance.toFixed(2)}`)
-      setShift(null)
-      setShiftSaving(false); setShiftCloseModal(false)
+      finalizeOfflineClose()
     }
+  }
+
+  function finalizeOfflineClose() {
+    const cs = offlineStore.getClientShift()
+    if (!cs) { toast.error("No open shift to close"); setShiftSaving(false); return }
+    const expected = cs.openingCash + cs.cashSales + cs.cashCollections
+    const variance = Math.round((shiftCloseTotal - expected + 1e-12) * 100) / 100
+    offlineStore.setClientShift({
+      ...cs,
+      closingCash: shiftCloseTotal,
+      closingGcash: Number(shiftCloseGcash) || 0,
+      closingDenoms: shiftCloseDenoms,
+      note: shiftCloseNote,
+    })
+    // Print close report using local ledger figures
+    printShiftReport({
+      opened_at: cs.openedAt,
+      closed_at: new Date().toISOString(),
+      opening_cash: cs.openingCash,
+      cash_sales: cs.cashSales,
+      cash_collections: cs.cashCollections,
+      expected_cash: expected,
+      closing_cash: shiftCloseTotal,
+      variance,
+      opening_gcash: cs.openingGcash,
+      gcash_sales: cs.gcashSales,
+      closing_gcash: Number(shiftCloseGcash) || 0,
+      closing_denoms: shiftCloseDenoms,
+      note: shiftCloseNote,
+    })
+    toast.success(`Shift closed offline — will sync. Variance: ${variance >= 0 ? "+" : ""}₱${variance.toFixed(2)}`)
+    setShift(null)
+    setShiftSaving(false); setShiftCloseModal(false)
   }
 
   function printShiftReport(s: any) {
@@ -285,7 +330,7 @@ export default function PosPage() {
     w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Shift Report</title>
     <style>@page{size:80mm auto;margin:4mm}body{font-family:'Courier New',monospace;font-size:12px;width:72mm;margin:0 auto;color:#000}.c{text-align:center}.line{border-top:1px dashed #000;margin:4px 0}table{width:100%;border-collapse:collapse}td{font-size:11px;padding:1px 2px}</style>
     </head><body onload="setTimeout(()=>window.print(),300)">
-      <div class="c"><strong style="font-size:14px">${user?.name ? "GroceryPOS" : "GroceryPOS"}</strong><br/><span style="font-size:10px">SHIFT CASH REPORT</span></div>
+      <div class="c"><strong style="font-size:14px">${storeName || "GroceryPOS"}</strong><br/><span style="font-size:10px">SHIFT CASH REPORT</span></div>
       <div class="line"></div>
       <div style="font-size:10px">Cashier: ${user?.name || ""}<br/>Opened: ${new Date(s.opened_at).toLocaleString("en-PH")}<br/>Closed: ${new Date(s.closed_at).toLocaleString("en-PH")}</div>
       <div class="line"></div>
@@ -511,7 +556,7 @@ export default function PosPage() {
 
     const showReceipt = async (sn: string) => {
       const receiptText = {
-        header: "GroceryPOS",
+        header: storeName || "GroceryPOS",
         subtitle: `Receipt #${sn}`,
         items: cart.items.map(i => ({ name: `${i.itemName} (${i.unitName})`, qty: i.qty, price: i.unitPrice * i.qty })),
         subtotal: Math.round(cart.subtotal * 100) / 100,
@@ -668,7 +713,7 @@ export default function PosPage() {
             <img src="/new logo.png" alt="RicePOS" className="h-full w-full object-contain p-0.5" />
           </div>
           <div>
-            <h1 className="hidden sm:block text-sm sm:text-base font-bold leading-tight tracking-tight truncate">GroceryPOS</h1>
+            <h1 className="hidden sm:block text-sm sm:text-base font-bold leading-tight tracking-tight truncate">{storeName || "GroceryPOS"}</h1>
             <p className="hidden sm:block text-[0.6rem] sm:text-[0.7rem] font-medium text-amber-600 leading-tight">Point of Sale</p>
           </div>
         </div>
@@ -1053,7 +1098,7 @@ export default function PosPage() {
             </div>
             <DenominationCounter value={shiftCloseDenoms} onChange={(d, t) => { setShiftCloseDenoms(d); setShiftCloseTotal(t) }} />
             {shift && (
-              <div className={`rounded-lg p-2 text-center text-sm font-semibold ${(shiftCloseTotal - Number(shift.expected_cash)) === 0 ? "bg-green-500/20 text-green-300" : "bg-red-500/20 text-red-300"}`}>
+              <div className={`rounded-lg p-2 text-center text-sm font-semibold ${(shiftCloseTotal - Number(shift.expected_cash)) === 0 ? "bg-green-500/20 text-green-700" : "bg-red-500/20 text-red-600"}`}>
                 Variance: {(shiftCloseTotal - Number(shift.expected_cash)) >= 0 ? "+" : ""}₱{(shiftCloseTotal - Number(shift.expected_cash)).toFixed(2)}
                 {(shiftCloseTotal - Number(shift.expected_cash)) > 0 ? " (over)" : (shiftCloseTotal - Number(shift.expected_cash)) < 0 ? " (short)" : " (balanced)"}
               </div>

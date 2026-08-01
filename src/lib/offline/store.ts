@@ -70,6 +70,8 @@ export const offlineStore = {
   setLastOfflineNum: (v: number) => write("num", v),
   getLastError: () => read<SyncError | null>("err", null),
   setLastError: (v: SyncError | null) => write("err", v),
+  getStoreName: () => read<string | null>("storeName", null),
+  setStoreName: (v: string | null) => write("storeName", v),
   getCart: () => read<{ carts: unknown[]; activeId: string | null; savedAt: number } | null>("cart", null),
   setCart: (v: { carts: unknown[]; activeId: string | null; savedAt: number } | null) => write("cart", v),
 }

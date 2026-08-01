@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
       if (quantity === undefined || Number(quantity) <= 0) { errors.push(`Item ${itemId}: invalid quantity`); continue }
 
       const { data: item } = await db.from("items")
-        .select("stock_qty, name").eq("id", itemId).eq("store_id", storeId).single()
+        .select("stock_qty, name, cost").eq("id", itemId).eq("store_id", storeId).single()
       if (!item) { errors.push(`Item ${itemId}: not found in store`); continue }
 
       const oldQty = Number(item.stock_qty)
@@ -38,6 +38,7 @@ export async function POST(request: NextRequest) {
         change_qty: addQty, qty_before: oldQty, qty_after: newQty,
         reason: "delivery",
         note: `Delivery${supplier ? ` from ${supplier}` : ""}${note ? ` — ${note}` : ""}`,
+        cost: Number(item.cost) || 0,
         employee_id: session.employeeId,
       })
 

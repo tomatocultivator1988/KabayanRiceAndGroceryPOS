@@ -101,6 +101,7 @@ export default function SalesPage() {
   const [actionType, setActionType] = useState<"refund" | "void" | "reprint" | "">("")
   const [actionReason, setActionReason] = useState("")
   const [actionLoading, setActionLoading] = useState(false)
+  const [storeName, setStoreName] = useState("")
 
   const router = useRouter()
   const pathname = usePathname()
@@ -111,6 +112,12 @@ export default function SalesPage() {
       else { router.push("/auth/login") }
     }).catch(() => { router.push("/auth/login") })
   }, [router])
+
+  useEffect(() => {
+    fetch("/api/backoffice/store").then(r => r.json()).then(d => {
+      if (d.store?.name) setStoreName(d.store.name)
+    }).catch(() => {})
+  }, [])
 
   const handleLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" })
@@ -195,7 +202,7 @@ export default function SalesPage() {
         const s = json.sale
         const { openBrowserReceipt } = await import("@/lib/utils/printer")
         openBrowserReceipt({
-          header: "GroceryPOS", subtitle: "Receipt",
+          header: storeName || "GroceryPOS", subtitle: "Receipt",
           items: s.items.map((i: any) => ({ name: i.itemName, qty: i.qty, price: i.lineTotal })),
           subtotal: s.subtotal, discount: s.discountAmt || 0, tax: s.taxTotal || 0, total: s.total,
           paymentMethod: s.payments.map((p: any) => `${p.method} ₱${p.amount}`).join(" + "),

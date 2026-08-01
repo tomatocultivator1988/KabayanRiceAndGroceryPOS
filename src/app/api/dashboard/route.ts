@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
       { data: salesTrend },
     ] = await Promise.all([
       // Today's sales total
-      db.from("sales").select("total, balance, status").eq("store_id", storeId)
+      db.from("sales").select("id, total, balance, status").eq("store_id", storeId)
         .gte("created_at", `${today}T00:00:00`).lte("created_at", `${today}T23:59:59`)
         .not("status", "in", '("voided","refunded")'),
       // Cash today — exclude payments from voided/refunded sales

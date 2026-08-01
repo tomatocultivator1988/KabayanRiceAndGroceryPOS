@@ -9,7 +9,7 @@ async function querySoldItems(itemId: string, lastSettledAt: string | null) {
     .eq("item_id", itemId)
     .neq("status", "voided").neq("status", "refunded")
     .in("sales.status", ["completed", "paid", "partial", "unpaid"])
-  if (lastSettledAt) query = query.gt("sale_items.created_at", lastSettledAt)
+  if (lastSettledAt) query = query.gt("created_at", lastSettledAt)
   return query
 }
 
@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
 
     const { data: check } = await db.from("consignment_settlements")
       .select("id").eq("store_id", storeId).eq("item_id", itemId)
-      .gte("settled_at", prevLast || "1970-01-01T00:00:00").limit(1)
+      .gt("settled_at", prevLast || "1970-01-01T00:00:00").limit(1)
     if (check && check.length > 0) return NextResponse.json({ error: "Already settled. Please refresh." }, { status: 409 })
 
     await db.from("consignment_settlements").insert({

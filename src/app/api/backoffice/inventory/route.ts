@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     if (quantity === undefined || Number(quantity) === 0) return NextResponse.json({ error: "Quantity required" }, { status: 400 })
 
     const { data: item } = await db.from("items")
-      .select("stock_qty, name").eq("id", itemId).eq("store_id", storeId).single()
+      .select("stock_qty, name, cost").eq("id", itemId).eq("store_id", storeId).single()
     if (!item) return NextResponse.json({ error: "Item not found" }, { status: 404 })
 
     const delta = Number(quantity)
@@ -72,6 +72,7 @@ export async function POST(request: NextRequest) {
       qty_after: newQty,
       reason: adjReason,
       note: adjNote,
+      cost: Number(item.cost) || 0,
       employee_id: session.employeeId,
     })
 

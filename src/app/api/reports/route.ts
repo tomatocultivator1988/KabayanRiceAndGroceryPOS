@@ -229,7 +229,7 @@ export async function GET(request: NextRequest) {
             qty: Number(it.qty),
             unit: it.selling_unit_name,
             unit_price: Number(it.unit_price),
-            cost: it.cost_at_sale != null ? Number(it.cost_at_sale) : null,
+            total_cost: it.cost_at_sale != null ? Number(it.cost_at_sale) * Number(it.qty) * Number(it.base_qty_snapshot) : null,
             profit: it.cost_at_sale != null ? Number(it.line_total) - (Number(it.cost_at_sale) * Number(it.qty) * Number(it.base_qty_snapshot)) : null,
             discount_amount: Number(it.discount_amount),
             tax_amount: Number(it.tax_amount),

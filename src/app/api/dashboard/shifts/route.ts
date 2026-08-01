@@ -29,14 +29,22 @@ export async function GET(request: NextRequest) {
       let expectedCash = s.expected_cash
       let cashSales = s.cash_sales
       let cashCollections = s.cash_collections
+      let gcashSales = s.gcash_sales
+      let gcashCollections = s.gcash_collections
+      let expectedGcash = s.expected_gcash
       // For open shifts, compute live
       if (s.status === "open") {
         const { data: pays } = await db.from("payments")
-          .select("amount, is_collection").eq("method", "cash").gte("created_at", s.opened_at)
-        let cs = 0, cc = 0
-        for (const p of (pays ?? [])) { if (p.is_collection) cc += Number(p.amount); else cs += Number(p.amount) }
+          .select("amount, is_collection, method").gte("created_at", s.opened_at)
+        let cs = 0, cc = 0, gs = 0, gc = 0
+        for (const p of (pays ?? [])) {
+          if (p.method === "gcash") { if (p.is_collection) gc += Number(p.amount); else gs += Number(p.amount) }
+          else { if (p.is_collection) cc += Number(p.amount); else cs += Number(p.amount) }
+        }
         cashSales = cs; cashCollections = cc
         expectedCash = Number(s.opening_cash) + cs + cc
+        gcashSales = gs; gcashCollections = gc
+        expectedGcash = Number(s.opening_gcash || 0) + gs + gc
       }
       result.push({
         ...s,
@@ -44,6 +52,9 @@ export async function GET(request: NextRequest) {
         cash_sales: cashSales,
         cash_collections: cashCollections,
         expected_cash: expectedCash,
+        gcash_sales: gcashSales,
+        gcash_collections: gcashCollections,
+        expected_gcash: expectedGcash,
       })
     }
 

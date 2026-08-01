@@ -132,6 +132,27 @@ export function ShiftsManager() {
                     )}
                   </div>
 
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-xs border-t border-amber-300/40 pt-3 mt-3">
+                    <div className="bg-white rounded-lg p-2">
+                      <p className="text-stone-500">GCash Opening</p>
+                      <p className="text-sm font-bold text-stone-800">{Number(s.opening_gcash || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, style: "currency", currency: "PHP" })}</p>
+                    </div>
+                    <div className="bg-white rounded-lg p-2">
+                      <p className="text-stone-500">GCash Sales</p>
+                      <p className="text-sm font-bold text-blue-600">{Number(s.gcash_sales || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, style: "currency", currency: "PHP" })}</p>
+                    </div>
+                    <div className="bg-white rounded-lg p-2">
+                      <p className="text-stone-500">GCash Expected</p>
+                      <p className="text-sm font-bold text-blue-700">{Number(s.expected_gcash || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, style: "currency", currency: "PHP" })}</p>
+                    </div>
+                    {s.status === "closed" && (
+                      <div className="bg-white rounded-lg p-2">
+                        <p className="text-stone-500">GCash Counted</p>
+                        <p className="text-sm font-bold text-stone-800">{Number(s.closing_gcash || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, style: "currency", currency: "PHP" })}</p>
+                      </div>
+                    )}
+                  </div>
+
                   {s.status === "open" && openCount > 0 && (
                     <div className="mt-2 text-xs text-stone-500">
                       Opened with {openCount} pieces across {Object.values(s.opening_denoms).filter((v: any) => Number(v) > 0).length} denominations
