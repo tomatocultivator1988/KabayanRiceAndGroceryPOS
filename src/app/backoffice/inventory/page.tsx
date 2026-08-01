@@ -363,7 +363,7 @@ export default function InventoryPage() {
 
       {/* Movements Dialog */}
       <Dialog open={!!movementsItem} onOpenChange={() => setMovementsItem(null)}>
-        <DialogContent className="max-w-2xl bg-gold-200/90 border-amber-300/60 text-stone-800 p-5 max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl bg-gold-200/90 border-amber-300/60 text-stone-800 p-5 max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Movements — {movementsItem?.name}</DialogTitle></DialogHeader>
           {movementsItem && (
             <div className="space-y-4">

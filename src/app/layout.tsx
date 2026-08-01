@@ -13,10 +13,10 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
-  title: "RicePOS",
-  description: "Tablet POS for rice retail & grocery",
+  title: "Kabayan Mart",
+  description: "Retail and wholesale POS for rice and grocery",
   manifest: "/manifest.json",
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "RicePOS" },
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Kabayan Mart" },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

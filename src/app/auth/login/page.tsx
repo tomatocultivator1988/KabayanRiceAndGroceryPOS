@@ -73,12 +73,12 @@ export default function LoginPage() {
             <div className="mb-10 flex justify-center">
               <div className="relative w-72 h-72 flex items-center justify-center">
                 <div className="absolute inset-0 rounded-full bg-primary/15 blur-2xl" />
-                <img src="/new logo.png" alt="RicePOS" className="relative z-10 w-64 h-64 object-contain drop-shadow-[0_0_30px_rgba(212,175,55,0.25)]" />
+                <img src="/new logo.png" alt="Kabayan Mart" className="relative z-10 w-64 h-64 object-contain drop-shadow-[0_0_30px_rgba(212,175,55,0.25)]" />
               </div>
             </div>
 
             <h1 className="text-center font-display text-5xl font-extrabold leading-[1.05] text-white xl:text-6xl">
-              RicePOS
+              Kabayan Mart
             </h1>
 
             <p className="mx-auto mt-5 max-w-sm text-center text-base leading-relaxed text-white/75">
@@ -110,9 +110,9 @@ export default function LoginPage() {
             <div className="bk-rise mb-8 flex flex-col items-center text-center lg:hidden" style={{ animationDelay: "60ms" }}>
               <div className="relative mb-4 flex items-center justify-center">
                 <div className="absolute inset-0 rounded-full bg-primary/15 blur-xl animate-pulse" />
-                <img src="/new logo.png" alt="RicePOS" className="relative z-10 w-24 h-24 object-contain drop-shadow-[0_0_15px_rgba(212,175,55,0.25)]" />
+                <img src="/new logo.png" alt="Kabayan Mart" className="relative z-10 w-24 h-24 object-contain drop-shadow-[0_0_15px_rgba(212,175,55,0.25)]" />
               </div>
-              <h1 className="font-display text-3xl font-extrabold leading-tight text-white">RicePOS</h1>
+              <h1 className="font-display text-3xl font-extrabold leading-tight text-white">Kabayan Mart</h1>
               <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary">
                 <Sparkles className="size-3.5 text-primary sparkle-icon" />
                 Point of Sale
@@ -129,7 +129,7 @@ export default function LoginPage() {
 
               <div className="mb-7">
                 <h2 className="font-display text-2xl font-bold text-stone-800">Welcome back</h2>
-                <p className="mt-1 text-sm text-stone-500">Sign in to your stand to continue.</p>
+                <p className="mt-1 text-sm text-stone-500">Retail and Wholesale Ready</p>
               </div>
 
               <div className="space-y-5">
@@ -176,7 +176,7 @@ export default function LoginPage() {
 
             <p className="bk-rise mt-6 flex items-center justify-center gap-1.5 text-center text-xs text-stone-500" style={{ animationDelay: "420ms" }}>
               <Store className="size-3.5" />
-              RicePOS - Point of Sale
+              Kabayan Mart - Point of Sale
             </p>
           </div>
         </section>

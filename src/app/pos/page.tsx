@@ -710,7 +710,7 @@ export default function PosPage() {
         <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-amber-400/50 to-transparent animate-gold-shimmer bg-[length:200%_100%]" />
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-white/15 ring-1 ring-amber-400/20 overflow-hidden">
-            <img src="/new logo.png" alt="RicePOS" className="h-full w-full object-contain p-0.5" />
+            <img src="/new logo.png" alt="Kabayan Mart" className="h-full w-full object-contain p-0.5" />
           </div>
           <div>
             <h1 className="hidden sm:block text-sm sm:text-base font-bold leading-tight tracking-tight truncate">{storeName || "GroceryPOS"}</h1>

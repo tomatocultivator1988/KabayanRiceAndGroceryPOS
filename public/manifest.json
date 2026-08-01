@@ -1,7 +1,7 @@
 {
-  "name": "RicePOS",
-  "short_name": "RicePOS",
-  "description": "Tablet POS for rice retail & grocery",
+  "name": "Kabayan Mart",
+  "short_name": "Kabayan Mart",
+  "description": "Retail and wholesale POS for rice and grocery",
   "start_url": "/pos",
   "display": "standalone",
   "background_color": "#0D3B1E",
