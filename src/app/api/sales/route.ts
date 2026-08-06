@@ -35,17 +35,18 @@ export async function POST(request: NextRequest) {
     const sorted = [...payments].sort((a, b) =>
       a.method === "gcash" ? -1 : b.method === "gcash" ? 1 : 0
     )
-    const paymentsTotal = sorted.reduce((sum: number, p: any) => sum + p.amount, 0)
 
-    // Allocate payments: GCash first, cash covers remainder
+    // Allocate payments: GCash first (exact, no change); cash covers the rest.
+    // Change only ever comes from cash — a GCash overpayment can't return cash.
     let remaining = total
     const recorded = sorted.map(p => {
       const alloc = Math.min(p.amount, remaining)
       remaining -= alloc
       return { ...p, recorded_amount: alloc }
     })
+    const cashRecorded = recorded.filter((p: any) => p.method === "cash").reduce((s, p: any) => s + p.amount, 0)
     const totalPaid = recorded.reduce((sum, p) => sum + p.recorded_amount, 0)
-    const change = Math.max(0, paymentsTotal - totalPaid)
+    const change = Math.max(0, cashRecorded - recorded.filter((p: any) => p.method === "cash").reduce((s, p: any) => s + p.recorded_amount, 0))
     const balance = total - totalPaid
 
     let saleStatus: string

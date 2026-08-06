@@ -222,6 +222,7 @@ export default function PosPage() {
       offlineStore.setClientShift({
         openedAt: new Date().toISOString(),
         openingCash: shiftOpenTotal,
+        openingDenoms: shiftOpenDenoms,
         openingGcash: Number(shiftOpenGcash) || 0,
         cashSales: 0, gcashSales: 0, cashCollections: 0, gcashCollections: 0,
         openSynced: false,
@@ -491,13 +492,14 @@ export default function PosPage() {
     if (isShort && !cart.customerId) {
       toast.error("Select a customer to have a balance"); return
     }
-    let remaining = total
-    const cashPayment = Math.min(cash, remaining)
-    remaining = Math.max(0, remaining - cashPayment)
-    const gcashPayment = Math.min(gcash, remaining)
+    // Change only ever comes from cash. GCash is a digital transfer — an exact
+    // top-up that can never pay for "change", so the un-applied cash tender is
+    // the only thing returned. Mirrors the server's gcash-first allocation.
+    const gcashApplied = Math.min(gcash, total)
+    const cashApplied = Math.min(cash, Math.max(0, total - gcashApplied))
+    const change = Math.max(0, cash - cashApplied)
     const balance = isShort ? round2(total - paidTotal) : 0
-    const change = paidTotal > total ? round2(paidTotal - total) : 0
-    const totalPaid = cashPayment + gcashPayment
+    const totalPaid = cashApplied + gcashApplied
     // No utang/balance offline — can't verify customer balances without a network
     if (!navigator.onLine && isShort) {
       toast.error("Pay in full — utang is not available offline")
@@ -574,6 +576,12 @@ export default function PosPage() {
       }
       setReceiptData(receiptText)
       setReceiptModal(true)
+
+      // Auto-print if enabled in Settings (reflected at the saved time of sale)
+      try {
+        const { getAutoPrint, printReceipt } = await import("@/lib/utils/printer")
+        if (getAutoPrint()) await printReceipt(receiptText)
+      } catch { /* auto-print best-effort */ }
 
       // Cash drawer
       if (cash > 0) {
@@ -1041,8 +1049,9 @@ export default function PosPage() {
                 <Button variant="outline" className="flex-1 text-black border-gray-300" onClick={async () => {
                   try {
                     const { printReceipt } = await import("@/lib/utils/printer")
-                    await printReceipt(receiptData)
-                    toast.success("Receipt printing...")
+                    const ok = await printReceipt(receiptData)
+                    if (ok) toast.success("Receipt printing...")
+                    else toast.error("Print dialog blocked — use Reprint from Sales History")
                   } catch { toast.error("Print failed — try Reprint from Sales History") }
                 }}>
                   Print
@@ -1097,12 +1106,16 @@ export default function PosPage() {
               <Input type="number" inputMode="decimal" value={shiftCloseGcash} onChange={e => setShiftCloseGcash(e.target.value)} className="bg-gold-100 border-amber-300/60 h-10" />
             </div>
             <DenominationCounter value={shiftCloseDenoms} onChange={(d, t) => { setShiftCloseDenoms(d); setShiftCloseTotal(t) }} />
-            {shift && (
-              <div className={`rounded-lg p-2 text-center text-sm font-semibold ${(shiftCloseTotal - Number(shift.expected_cash)) === 0 ? "bg-green-500/20 text-green-700" : "bg-red-500/20 text-red-600"}`}>
-                Variance: {(shiftCloseTotal - Number(shift.expected_cash)) >= 0 ? "+" : ""}₱{(shiftCloseTotal - Number(shift.expected_cash)).toFixed(2)}
-                {(shiftCloseTotal - Number(shift.expected_cash)) > 0 ? " (over)" : (shiftCloseTotal - Number(shift.expected_cash)) < 0 ? " (short)" : " (balanced)"}
-              </div>
-            )}
+            {shift && (() => {
+              const diff = shiftCloseTotal - Number(shift.expected_cash)
+              const balanced = Math.abs(diff) < 0.005
+              const label = balanced ? " (balanced)" : diff > 0 ? " (over)" : " (short)"
+              return (
+                <div className={`rounded-lg p-2 text-center text-sm font-semibold ${balanced ? "bg-green-500/20 text-green-700" : "bg-red-500/20 text-red-600"}`}>
+                  Variance: {diff >= 0 ? "+" : ""}₱{diff.toFixed(2)}{label}
+                </div>
+              )
+            })()}
             <Input placeholder="Note (optional)" value={shiftCloseNote} onChange={e => setShiftCloseNote(e.target.value)} className="bg-gold-100 border-amber-300/60 h-10" />
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setShiftCloseModal(false)}>Cancel</Button>

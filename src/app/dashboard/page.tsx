@@ -3,12 +3,13 @@
 import { useState, useEffect, useCallback } from "react"
 import { Loader2Icon } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 
 interface DashboardData {
   todaySales: number; todayProfit: number; todayCash: number; todayGcash: number;
   outstandingUtang: number; lowStockCount: number; expensesToday: number;
   unknownCostItems: number;
+  rangeLabel: string;
   recentSales: { id: string; saleNumber: number; total: number; status: string; createdAt: string }[];
   topProducts: { name: string; qty: number }[];
   salesTrend: { date: string; total: number }[];
@@ -18,12 +19,13 @@ interface DashboardData {
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [range, setRange] = useState<"7d" | "14d" | "month">("month")
 
   const fetchData = useCallback(async () => {
-    const res = await fetch("/api/dashboard")
+    const res = await fetch(`/api/dashboard?range=${range}`)
     if (res.ok) setData(await res.json())
     setLoading(false)
-  }, [])
+  }, [range])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -63,19 +65,33 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* Sales Trend — Recharts */}
+      {/* Sales Trend — Range filter + bar chart */}
       <Card className="border-amber-300/60 bg-gold-200/90">
         <CardContent className="p-4">
-          <h2 className="text-sm font-semibold text-amber-600 mb-3">14-Day Sales Trend</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-amber-600">{data?.rangeLabel ?? "Monthly"} Sales</h2>
+            <div className="flex gap-1 rounded-lg bg-gold-100/80 p-1">
+              {([["7d", "7 Days"], ["14d", "14 Days"], ["month", "Month"]] as const).map(([key, label]) => (
+                <button key={key} onClick={() => setRange(key)}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${range === key ? "bg-primary text-primary-foreground" : "text-stone-500 hover:text-stone-700"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           {data?.salesTrend.length ? (
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={data.salesTrend}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#6b7280" }} tickFormatter={v => `${new Date(v).getDate()}/${new Date(v).getMonth()+1}`} />
-                <YAxis tick={{ fontSize: 11, fill: "#6b7280" }} tickFormatter={v => `₱${(v/1000).toFixed(0)}k`} />
-                <Tooltip formatter={(v: any) => [`₱${Number(v).toFixed(2)}`, "Sales"]} />
-                <Line type="monotone" dataKey="total" stroke="#D4AF37" strokeWidth={2} dot={{ fill: "#D4AF37", r: 3 }} />
-              </LineChart>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={data.salesTrend} margin={{ top: 5, right: 10, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5d5a0" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#6b7280" }}
+                  tickFormatter={v => String(new Date(v + "T00:00:00").getDate())} />
+                <YAxis tick={{ fontSize: 11, fill: "#6b7280" }}
+                  tickFormatter={v => `₱${(v / 1000).toFixed(0)}k`} />
+                <Tooltip
+                  labelFormatter={(v) => new Date(v + "T00:00:00").toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" })}
+                  formatter={(v: any) => [`₱${Number(v).toFixed(2)}`, "Sales"]} />
+                <Bar dataKey="total" fill="#D4AF37" radius={[3, 3, 0, 0]} maxBarSize={24} />
+              </BarChart>
             </ResponsiveContainer>
           ) : <p className="text-xs text-stone-500 py-8 text-center">No sales data yet</p>}
         </CardContent>

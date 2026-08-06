@@ -434,7 +434,7 @@ export default function InventoryPage() {
                     ))}
                   </div>
                   {/* Desktop Table */}
-                  <div className="hidden md:block rounded-xl border border-amber-300/60 overflow-x-auto">
+                  <div className="hidden md:block rounded-xl border border-amber-300/60">
                     <Table>
                       <TableHeader>
                         <TableRow className="border-amber-300/60 hover:bg-transparent">
@@ -452,7 +452,7 @@ export default function InventoryPage() {
                       <TableBody>
                         {movementsData.map((m: any) => (
                           <TableRow key={m.id} className="border-amber-300/60">
-                            <TableCell className="text-xs text-stone-700 whitespace-nowrap">{new Date(m.created_at).toLocaleString("en-PH")}</TableCell>
+                            <TableCell className="text-xs text-stone-700 whitespace-normal min-w-[120px]">{new Date(m.created_at).toLocaleString("en-PH")}</TableCell>
                             <TableCell className="text-xs capitalize text-stone-500">{m.reason}</TableCell>
                             <TableCell className="text-xs text-right font-medium text-green-600">{m.qty_in > 0 ? Number(m.qty_in).toFixed(movementsItem?.sell_by === "weight" ? 3 : 0) : "—"}</TableCell>
                             <TableCell className="text-xs text-right font-medium text-red-500">{m.qty_out > 0 ? Number(m.qty_out).toFixed(movementsItem?.sell_by === "weight" ? 3 : 0) : "—"}</TableCell>

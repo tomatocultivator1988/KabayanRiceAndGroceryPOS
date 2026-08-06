@@ -43,6 +43,7 @@ export interface SyncError {
 export interface ClientShift {
   openedAt: string
   openingCash: number
+  openingDenoms?: Record<string, number>
   openingGcash: number
   cashSales: number
   gcashSales: number

@@ -225,7 +225,7 @@ export function useCart() {
     if (!discount.type || discount.value <= 0) return 0
     const eligibleItems = items.filter(i => i.discountEligible)
     if (eligibleItems.length === 0) return 0
-    return eligibleTotal * (discount.value / 100)
+    return Math.round(eligibleTotal * (discount.value / 100) * 100) / 100
   })()
 
   const afterDiscount = subtotal - discountAmount

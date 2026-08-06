@@ -6,7 +6,28 @@ export async function GET(request: NextRequest) {
   try {
     const session = await getSession()
     const storeId = session.storeId
-    const today = new Date().toISOString().split("T")[0]
+    const now = new Date()
+    const today = now.toISOString().split("T")[0]
+    const monthLabel = now.toLocaleString("en-PH", { month: "long", year: "numeric" })
+
+    // Sales trend range: 7d | 14d | month (default)
+    const range = request.nextUrl.searchParams.get("range") || "month"
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+    let rangeLabel = monthLabel
+    let trendDays: string[] = []
+    let trendStartISO = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+    if (range === "7d") {
+      rangeLabel = "Last 7 Days"
+      for (let i = 6; i >= 0; i--) trendDays.push(fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate() - i)))
+      trendStartISO = trendDays[0] + "T00:00:00"
+    } else if (range === "14d") {
+      rangeLabel = "Last 14 Days"
+      for (let i = 13; i >= 0; i--) trendDays.push(fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate() - i)))
+      trendStartISO = trendDays[0] + "T00:00:00"
+    } else {
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+      for (let d = 1; d <= lastDay; d++) trendDays.push(fmt(new Date(now.getFullYear(), now.getMonth(), d)))
+    }
 
     const [
       { data: todaySales },
@@ -43,10 +64,11 @@ export async function GET(request: NextRequest) {
         .order("created_at", { ascending: false }).limit(10),
       // Last cash count
       db.from("cash_counts").select("*").eq("store_id", storeId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
-      // Sales trend (last 14 days)
+      // Sales trend (range: last 7/14 days or current month)
       db.from("sales").select("total, created_at")
         .eq("store_id", storeId).not("status", "in", '("voided","refunded")')
-        .gte("created_at", new Date(Date.now() - 14 * 86400000).toISOString())
+        .gte("created_at", trendStartISO)
+        .lte("created_at", `${today}T23:59:59`)
         .order("created_at", { ascending: true }),
     ])
 
@@ -89,13 +111,13 @@ export async function GET(request: NextRequest) {
     }
     const top5 = [...productMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
 
-    // Sales trend grouped by day
+    // Sales trend — every day in range filled (0 for days with no sales)
     const trendMap = new Map<string, number>()
     for (const s of (salesTrend ?? [])) {
       const d = new Date(s.created_at).toISOString().split("T")[0]
       trendMap.set(d, (trendMap.get(d) || 0) + Number(s.total))
     }
-    const trend = [...trendMap.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+    const trend = trendDays.map(date => ({ date, total: trendMap.get(date) || 0 }))
 
     return NextResponse.json({
       todaySales: todayTotal,
@@ -106,12 +128,13 @@ export async function GET(request: NextRequest) {
       lowStockCount: (lowStock ?? []).filter((i: any) => Number(i.stock_qty) <= Number(i.min_stock)).length,
       expensesToday,
       unknownCostItems: unknownCostCount,
+      rangeLabel,
       recentSales: (recentSales ?? []).map((s: any) => ({
         id: s.id, saleNumber: s.sale_number, total: Number(s.total),
         status: s.status, createdAt: s.created_at,
       })),
       topProducts: top5.map(([name, qty]) => ({ name, qty })),
-      salesTrend: trend.map(([date, total]) => ({ date, total })),
+      salesTrend: trend.map(({ date, total }) => ({ date, total })),
       lastCashCount: lastCashCount ? {
         variance: Number((lastCashCount as any).variance),
         date: (lastCashCount as any).date,

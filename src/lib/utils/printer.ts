@@ -256,24 +256,24 @@ export async function printReceipt(data: ReceiptData): Promise<boolean> {
     if (!isPrinterConnected()) {
       const reconnected = await reconnectPrinter()
       if (!reconnected) {
-        // Fall back to browser print
-        openBrowserReceipt(data)
-        return true
+        // Fall back to browser print — only report success if the dialog opened.
+        return openBrowserReceipt(data)
       }
     }
     const receipt = buildReceipt(data)
     return await sendRaw(receipt)
   } catch {
     // Try browser print as last resort
-    try { openBrowserReceipt(data) } catch {}
-    return false
+    try { return openBrowserReceipt(data) } catch { return false }
   }
 }
 
-// Browser-based receipt (opens print dialog)
-export function openBrowserReceipt(data: ReceiptData) {
+// Browser-based receipt (opens print dialog). Returns true only if the print
+// window actually opened (window.open can be silently blocked by the browser).
+export function openBrowserReceipt(data: ReceiptData): boolean {
   const w = window.open("", "receipt", "width=320,height=600")
-  if (!w) return
+  if (!w) return false
+  const opened = !!w.document
   const itemsHtml = data.items.map(i => `
     <tr>
       <td style="text-align:left;padding:1px 4px;">${i.name.slice(0, 22)}</td>
@@ -331,6 +331,7 @@ export function openBrowserReceipt(data: ReceiptData) {
     </body></html>
   `)
   w.document.close()
+  return opened
 }
 
 // Open cash drawer via ESC/p command (printer RJ12 port)

@@ -42,7 +42,7 @@ async function doSync(): Promise<{ synced: number; failed: number }> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           opening_cash: shift.openingCash,
-          opening_denoms: {},
+          opening_denoms: shift.openingDenoms || {},
           opening_gcash: shift.openingGcash,
         }),
       })
