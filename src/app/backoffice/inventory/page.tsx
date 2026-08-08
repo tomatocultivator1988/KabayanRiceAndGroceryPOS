@@ -363,7 +363,7 @@ export default function InventoryPage() {
 
       {/* Movements Dialog */}
       <Dialog open={!!movementsItem} onOpenChange={() => setMovementsItem(null)}>
-        <DialogContent className="max-w-4xl bg-gold-200/90 border-amber-300/60 text-stone-800 p-5 max-h-[85vh] overflow-y-auto">
+        <DialogContent className="w-[min(96vw,60rem)] max-w-none bg-gold-200/90 border-amber-300/60 text-stone-800 p-5 max-h-[85vh] overflow-y-auto sm:max-w-none">
           <DialogHeader><DialogTitle>Movements — {movementsItem?.name}</DialogTitle></DialogHeader>
           {movementsItem && (
             <div className="space-y-4">
@@ -434,7 +434,7 @@ export default function InventoryPage() {
                     ))}
                   </div>
                   {/* Desktop Table */}
-                  <div className="hidden md:block rounded-xl border border-amber-300/60">
+                  <div className="hidden md:block rounded-xl border border-amber-300/60 overflow-x-hidden">
                     <Table className="table-fixed">
                       <TableHeader>
                         <TableRow className="border-amber-300/60 hover:bg-transparent">
@@ -452,14 +452,14 @@ export default function InventoryPage() {
                       <TableBody>
                         {movementsData.map((m: any) => (
                           <TableRow key={m.id} className="border-amber-300/60">
-                            <TableCell className="text-xs text-stone-700 whitespace-normal min-w-[120px]">{new Date(m.created_at).toLocaleString("en-PH")}</TableCell>
+                            <TableCell className="text-xs text-stone-700 whitespace-normal">{new Date(m.created_at).toLocaleString("en-PH")}</TableCell>
                             <TableCell className="text-xs capitalize text-stone-500">{m.reason}</TableCell>
                             <TableCell className="text-xs text-right font-medium text-green-600">{m.qty_in > 0 ? Number(m.qty_in).toFixed(movementsItem?.sell_by === "weight" ? 3 : 0) : "—"}</TableCell>
                             <TableCell className="text-xs text-right font-medium text-red-500">{m.qty_out > 0 ? Number(m.qty_out).toFixed(movementsItem?.sell_by === "weight" ? 3 : 0) : "—"}</TableCell>
                             <TableCell className="text-xs text-right font-medium text-stone-700">{Number(m.qty_after).toFixed(movementsItem?.sell_by === "weight" ? 3 : 0)}</TableCell>
                             <TableCell className="text-xs text-right text-stone-500">{m.cost ? "₱" + Number(m.cost).toFixed(2) : "—"}</TableCell>
                             <TableCell className="text-xs text-right text-stone-500">{m.sold_price ? "₱" + Number(m.sold_price).toFixed(2) : "—"}</TableCell>
-                            <TableCell className="text-xs text-stone-400 max-w-[120px] truncate">{m.note ?? "—"}</TableCell>
+                            <TableCell className="text-xs text-stone-400 whitespace-normal break-words">{m.note ?? "—"}</TableCell>
                             <TableCell className="text-xs text-stone-400">{m.employee_name ?? "—"}</TableCell>
                           </TableRow>
                         ))}
