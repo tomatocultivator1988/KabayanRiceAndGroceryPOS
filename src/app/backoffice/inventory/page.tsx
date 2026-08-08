@@ -435,7 +435,7 @@ export default function InventoryPage() {
                   </div>
                   {/* Desktop Table */}
                   <div className="hidden md:block rounded-xl border border-amber-300/60">
-                    <Table>
+                    <Table className="table-fixed">
                       <TableHeader>
                         <TableRow className="border-amber-300/60 hover:bg-transparent">
                           <TableHead className="text-[10px] text-stone-500 font-semibold">Date</TableHead>
